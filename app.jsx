@@ -11,10 +11,10 @@ const { playRollSound } = window;
 
 // Player setup: human + 3 AI.
 const PLAYERS = [
-  { id: 'kevin',  name: 'Kevin',  color: '#D88A1F', isHuman: false },
-  { id: 'mira',   name: 'Mira',   color: '#3F8CCB', isHuman: false },
-  { id: 'jules',  name: 'Jules',  color: '#5BA15B', isHuman: false },
-  { id: 'you',    name: 'You',    color: '#7A4FB0', isHuman: true  },
+  { id: 'al',    name: 'Al',    color: '#D88A1F', isHuman: false },
+  { id: 'kban',  name: 'K-Ban', color: '#3F8CCB', isHuman: false },
+  { id: 'marty', name: 'Marty', color: '#5BA15B', isHuman: false },
+  { id: 'you',   name: 'You',   color: '#7A4FB0', isHuman: true  },
 ];
 
 const STARTING_DICE = 5;
@@ -119,13 +119,6 @@ function App() {
     }, 750 + Math.random() * 600);
     return () => { cancelled = true; clearTimeout(t); };
   }, [state.turnIdx, state.phase]);
-
-  // ── Auto-advance roundEnd after a beat
-  React.useEffect(() => {
-    if (state.phase !== 'roundEnd') return;
-    const t = setTimeout(() => startNextRound(), 3500);
-    return () => clearTimeout(t);
-  }, [state.phase]);
 
   // Heuristic: AI does show-reroll only if all its hidden non-supporters are exactly the
   // dice that the new bid count would push it to gamble on.
