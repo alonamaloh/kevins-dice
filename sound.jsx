@@ -1,0 +1,70 @@
+// sound.jsx — procedural dice-roll SFX via Web Audio.
+// playRollSound(n) lays down `n` short noise bursts over a span scaled
+// to `n`, so a 20-die round-start sounds like a clatter and a 2-die
+// reroll sounds like a click or two.
+
+let _ctx = null;
+
+function _ensureCtx() {
+  if (_ctx) return _ctx;
+  const Ctor = window.AudioContext || window.webkitAudioContext;
+  if (!Ctor) return null;
+  _ctx = new Ctor();
+  return _ctx;
+}
+
+function _resumeCtx() {
+  if (_ctx && _ctx.state === 'suspended') _ctx.resume();
+}
+
+// iOS Safari requires the AudioContext to be created/resumed during a
+// user gesture. Hook the first pointerdown anywhere on the page to do
+// that — after one tap, sounds play freely.
+document.addEventListener('pointerdown', () => {
+  _ensureCtx();
+  _resumeCtx();
+}, { once: true });
+
+function _scheduleClick(ctx, when, intensity = 1) {
+  // Decaying noise burst, band-pass-filtered around 1.5–3 kHz so it
+  // sounds like a small object skipping on a hard surface.
+  const dur = 0.04 + Math.random() * 0.06;          // 40–100 ms
+  const sampleCount = Math.max(1, Math.ceil(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, sampleCount, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < sampleCount; i++) {
+    const t = i / sampleCount;
+    data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 7);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = buf;
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 1400 + Math.random() * 1800;
+  filter.Q.value = 3 + Math.random() * 5;
+  const gain = ctx.createGain();
+  gain.gain.value = 0.22 * intensity;
+  src.connect(filter); filter.connect(gain); gain.connect(ctx.destination);
+  src.start(when);
+  src.stop(when + dur);
+}
+
+function playRollSound(numDice) {
+  const ctx = _ensureCtx();
+  if (!ctx) return;
+  _resumeCtx();
+  if (ctx.state !== 'running') return; // pre-gesture: skip silently.
+  const n = Math.max(1, Math.floor(numDice));
+  // Span scales with count, capped so even 20-die rounds finish quickly.
+  const span = Math.min(0.25 + n * 0.04, 1.1);
+  const now = ctx.currentTime;
+  for (let i = 0; i < n; i++) {
+    // Bias the schedule earlier: most clicks happen in the first half
+    // of the span, then a few stragglers tail off.
+    const r = Math.random();
+    const t = now + Math.pow(r, 0.7) * span;
+    _scheduleClick(ctx, t, 0.6 + Math.random() * 0.4);
+  }
+}
+
+Object.assign(window, { playRollSound });
