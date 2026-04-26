@@ -310,7 +310,8 @@ function App() {
       <div style={{
         height: '100dvh', display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center', gap: 24,
-        background: '#F4F1EC', color: '#111',
+        // Match the photo's center beige so the masked edges blend in.
+        background: '#F2EFE9', color: '#111',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
         fontFamily: '-apple-system, system-ui, sans-serif',
@@ -323,7 +324,10 @@ function App() {
           alt="Four colorful dice"
           style={{
             width: '70%', maxWidth: 320, height: 'auto',
-            borderRadius: 16, boxShadow: '0 8px 28px rgba(0,0,0,0.18)',
+            // Soft elliptical fade so the photo dissolves into the bg
+            // instead of sitting in a hard rectangle.
+            WebkitMaskImage: 'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
+            maskImage:       'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
           }}
         />
         <button
