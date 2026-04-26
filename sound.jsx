@@ -17,8 +17,21 @@ function _ensureCtx() {
   return _ctx;
 }
 
-// First pointerdown anywhere on the page creates / resumes the
-// AudioContext. Subsequent taps reuse the same one.
+// Call from inside a user-gesture handler (e.g. the "Start game"
+// onClick) to unlock audio. Returns a promise that resolves once the
+// context is running, so the caller can await before triggering any
+// sounds. Chrome Android refuses to play if resume() hasn't finished.
+async function unlockAudio() {
+  const ctx = _ensureCtx();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    try { await ctx.resume(); } catch {}
+  }
+}
+
+// Belt-and-braces fallback: if audio is somehow still suspended after
+// the splash (or there's no splash at all), the next pointerdown
+// anywhere on the page will retry the unlock.
 document.addEventListener('pointerdown', () => {
   const ctx = _ensureCtx();
   if (ctx && ctx.state === 'suspended') ctx.resume();
@@ -64,4 +77,4 @@ function playRollSound(numDice) {
   }
 }
 
-Object.assign(window, { playRollSound });
+Object.assign(window, { playRollSound, unlockAudio });

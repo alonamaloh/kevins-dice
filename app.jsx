@@ -7,7 +7,7 @@ const { Die, MiniDie, PlayerRow, hexA } = window;
 const { effective, bidBeats, legalBids, supportsBid, canShowReroll, resolveChallenge, aiTurn, totalDice } = window;
 const { BidPanel } = window;
 const { loadPolicy, policyChooseBid, policyChooseShowReroll } = window;
-const { playRollSound } = window;
+const { playRollSound, unlockAudio } = window;
 
 // Player setup: human + 3 AI.
 const PLAYERS = [
@@ -256,7 +256,13 @@ function App() {
   }
 
   function newGame() { setState(makeInitialState()); }
-  function startFromSplash() { setState((s) => ({ ...s, phase: 'bid' })); }
+  async function startFromSplash() {
+    // Unlock audio while we still have a verifiable user gesture, and
+    // wait for the AudioContext to be running before kicking off the
+    // round (its very first event is the dice-roll clatter).
+    await unlockAudio();
+    setState((s) => ({ ...s, phase: 'bid' }));
+  }
 
   // ── Human helpers ─────────────────────────────────────────
   function toggleSelect(idx) {
