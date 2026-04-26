@@ -173,17 +173,17 @@ async function policyChooseBid(players, currentBid, perspectiveIdx, history, tot
 }
 
 // ── High-level: the AI's show-reroll decision ─────────────────────
-// Returns a Set<number> of hand indices to reveal, or null for skip.
+// Binary choice: skip vs reveal-and-reroll. The reveal set is fixed by
+// the position:
+//   • If the bidder has any supporting hidden dice (1s or bid-face),
+//     reveal *all* of them and reroll the rest.
+//   • Otherwise (no supporters at all — the desperate case where the
+//     bidder is raising by one on faith), reveal a single non-supporter
+//     (the first by hand index) and reroll the rest.
+// The action is illegal when every hidden die is a supporter (nothing
+// to reroll) or when fewer than 2 dice are hidden.
 //
-// Action space (up to 3 options, in this order):
-//   0  skip
-//   1  reveal-all-supporters (1s + bid-face dice), reroll the rest
-//      — only when 1 ≤ |supporters| < |hidden|
-//   2  reveal one non-supporter (the first by hand index), reroll the rest
-//      — only when ≥1 non-supporter exists. Useful in the desperate case
-//      where the bidder believes the previous bid is correct but no
-//      higher bid is, so they raise by exactly one and gamble on a fresh
-//      reroll of the rest.
+// Returns a Set<number> of hand indices to reveal, or null for skip.
 async function policyChooseShowReroll(players, bid, perspectiveIdx) {
   const me = players[perspectiveIdx];
   const hidden = me.dice
@@ -191,34 +191,25 @@ async function policyChooseShowReroll(players, bid, perspectiveIdx) {
     .filter(({ d }) => !d.revealed);
   if (hidden.length < 2) return null;
 
-  const supporters    = hidden.filter(({ d }) => supportsBid(d.face, bid.f));
-  const nonSupporters = hidden.filter(({ d }) => !supportsBid(d.face, bid.f));
+  const supporters = hidden.filter(({ d }) => supportsBid(d.face, bid.f));
+  if (supporters.length === hidden.length) return null;   // all supporters → no reroll possible
 
-  const options = [{ kind: 'skip', indices: new Set(), faces: [] }];
-  if (supporters.length > 0 && supporters.length < hidden.length) {
-    options.push({
-      kind:    'all-supporters',
-      indices: new Set(supporters.map((s) => s.i)),
-      faces:   supporters.map((s) => s.d.face),
-    });
+  let revealIndices, revealFaces;
+  if (supporters.length > 0) {
+    revealIndices = new Set(supporters.map((s) => s.i));
+    revealFaces   = supporters.map((s) => s.d.face);
+  } else {
+    // No supporters: sacrifice the first hidden die to keep the action
+    // available.
+    const first = hidden[0];
+    revealIndices = new Set([first.i]);
+    revealFaces   = [first.d.face];
   }
-  if (nonSupporters.length > 0) {
-    const first = nonSupporters[0];
-    options.push({
-      kind:    'one-non-supporter',
-      indices: new Set([first.i]),
-      faces:   [first.d.face],
-    });
-  }
-  if (options.length === 1) return null;   // only skip is possible
 
-  // bidderIdx for the obs is the AI itself (just made the bid).
   const obs   = encodeObs(players, perspectiveIdx, bid, perspectiveIdx, /*sr*/ true);
-  const feats = showRerollMoveFeatures(options.map((o) => o.faces));
-  const scores = await _scoreMoves(obs, feats, options.length);
-  const pick = _argmax(scores);
-  const chosen = options[pick];
-  return chosen.kind === 'skip' ? null : chosen.indices;
+  const feats = showRerollMoveFeatures([[], revealFaces]);   // [skip, reveal]
+  const scores = await _scoreMoves(obs, feats, 2);
+  return _argmax(scores) === 1 ? revealIndices : null;
 }
 
 Object.assign(window, {
