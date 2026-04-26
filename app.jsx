@@ -309,28 +309,37 @@ function App() {
     return (
       <div style={{
         height: '100dvh', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', gap: 18,
+        alignItems: 'center', justifyContent: 'center', gap: 22,
         background: '#F4F1EC', color: '#111',
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
         fontFamily: '-apple-system, system-ui, sans-serif',
       }}>
         <div style={{
-          fontSize: 11, color: 'rgba(0,0,0,0.45)', fontWeight: 600,
-          textTransform: 'uppercase', letterSpacing: 1.2,
+          fontSize: 12, color: 'rgba(0,0,0,0.45)', fontWeight: 600,
+          textTransform: 'uppercase', letterSpacing: 1.4,
         }}>
           Kevin's Dice
         </div>
+        <img
+          src="splash-dice-photo.png"
+          alt="Four colorful dice"
+          style={{
+            width: '70%', maxWidth: 320, height: 'auto',
+            borderRadius: 16, boxShadow: '0 8px 28px rgba(0,0,0,0.18)',
+          }}
+        />
         <div style={{
-          fontSize: 28, fontWeight: 700, letterSpacing: -0.3, textAlign: 'center',
-          maxWidth: 320, padding: '0 16px',
+          fontSize: 18, fontWeight: 600, letterSpacing: -0.2,
+          color: 'rgba(0,0,0,0.65)', textAlign: 'center',
+          maxWidth: 320, padding: '0 24px', lineHeight: 1.35,
         }}>
           A Liar's Dice variant.<br />Wild 1s. Show and reroll.
         </div>
         <button
           onClick={startFromSplash}
           style={{
-            marginTop: 16, padding: '14px 36px', borderRadius: 14,
+            marginTop: 6, padding: '14px 36px', borderRadius: 14,
             border: 'none', background: '#111', color: '#fff',
             fontSize: 18, fontWeight: 700, cursor: 'pointer',
           }}
