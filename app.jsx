@@ -131,24 +131,19 @@ function App() {
   }
 
   // ── Actions ────────────────────────────────────────────────
-  function doCommitBid(playerId, bid, withShowReroll) {
+  // `revealHandIndices` is a Set<number> of hand indices to reveal (empty
+  // / null means no show-and-reroll). Both human and AI paths now build
+  // it before calling.
+  function doCommitBid(playerId, bid, revealHandIndices) {
+    const willReveal = !!(revealHandIndices && revealHandIndices.size > 0);
     setState((s) => {
       const players = s.players.map((p) => ({ ...p, dice: p.dice.map((d) => ({ ...d })) }));
       const pIdx = indexOfPlayer(players, playerId);
       const actor = players[pIdx];
 
-      // Show-and-reroll: reveal supporters (or selected), reroll rest of hidden.
-      if (withShowReroll) {
-        const hidden = actor.dice.map((d, i) => ({ d, i })).filter(({ d }) => !d.revealed);
-        let toReveal;
-        if (actor.isHuman) {
-          // Use selection (already validated as supporters of the *new* bid)
-          toReveal = new Set(s.selection);
-        } else {
-          toReveal = new Set(hidden.filter(({ d }) => supportsBid(d.face, bid.f)).map(({ i }) => i));
-        }
+      if (willReveal) {
         actor.dice = actor.dice.map((d, i) => {
-          if (toReveal.has(i)) return { ...d, revealed: true };
+          if (revealHandIndices.has(i)) return { ...d, revealed: true };
           if (!d.revealed) return { face: rollDie(), revealed: false };
           return d;
         });
@@ -160,24 +155,11 @@ function App() {
         ...s, players, history, bid, turnIdx: nextIdx, selection: [],
       };
     });
-    // Reroll clatter — count the dice that just got rerolled (= hidden
-    // dice not in the reveal set) so the sound matches the action.
-    if (withShowReroll) {
+    // Reroll clatter — rerolled count = (hidden dice before) - (revealed).
+    if (willReveal) {
       const before = stateRef.current.players.find((p) => p.id === playerId);
-      const hiddenIdxs = before.dice
-        .map((d, i) => ({ d, i }))
-        .filter(({ d }) => !d.revealed)
-        .map(({ i }) => i);
-      let revealedSet;
-      if (before.isHuman) {
-        revealedSet = new Set(stateRef.current.selection);
-      } else {
-        revealedSet = new Set(before.dice
-          .map((d, i) => ({ d, i }))
-          .filter(({ d, i }) => !d.revealed && supportsBid(d.face, bid.f))
-          .map(({ i }) => i));
-      }
-      const numRerolled = hiddenIdxs.filter((i) => !revealedSet.has(i)).length;
+      const hiddenCount = before.dice.filter((d) => !d.revealed).length;
+      const numRerolled = hiddenCount - revealHandIndices.size;
       if (numRerolled > 0) playRollSound(numRerolled);
     }
   }
@@ -293,8 +275,10 @@ function App() {
 
   function humanCommitBid(bid) {
     if (!isMyTurn) return;
-    const willShowReroll = selectionValidForBid(state, bid);
-    doCommitBid('you', bid, willShowReroll);
+    const reveal = selectionValidForBid(state, bid)
+      ? new Set(state.selection)
+      : null;
+    doCommitBid('you', bid, reveal);
   }
 
   function humanCallLiar() {

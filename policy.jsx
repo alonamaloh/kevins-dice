@@ -121,18 +121,20 @@ function bidMoveFeatures(legalBids, includeCallLiar) {
   return flat;
 }
 
-function showRerollMoveFeatures(supportFaces /* faces revealed by option 1 */,
-                                hasRevealOption) {
-  // Two options: index 0 = skip; index 1 = reveal-all-supporters (when present).
-  const n = hasRevealOption ? 2 : 1;
+function showRerollMoveFeatures(optionFaces /* array of arrays-of-revealed-faces; [] = skip */) {
+  // Index 0 should always be skip ([]); subsequent options each describe
+  // a distinct reveal subset by the faces they would commit publicly.
+  const n = optionFaces.length;
   const flat = new Float32Array(n * MOVE_FEAT_DIM);
-  flat[0 * MOVE_FEAT_DIM + 3] = 1.0; // is_skip
-  if (hasRevealOption) {
-    let n_rev = supportFaces.length;
-    let ones  = supportFaces.filter((f) => f === 1).length;
-    flat[1 * MOVE_FEAT_DIM + 2] = 1.0; // is_show_reroll
-    flat[1 * MOVE_FEAT_DIM + 7] = n_rev;
-    flat[1 * MOVE_FEAT_DIM + 8] = ones;
+  for (let i = 0; i < n; i++) {
+    const faces = optionFaces[i];
+    if (faces.length === 0) {
+      flat[i * MOVE_FEAT_DIM + 3] = 1.0;   // is_skip
+    } else {
+      flat[i * MOVE_FEAT_DIM + 2] = 1.0;   // is_show_reroll
+      flat[i * MOVE_FEAT_DIM + 7] = faces.length;
+      flat[i * MOVE_FEAT_DIM + 8] = faces.filter((f) => f === 1).length;
+    }
   }
   return flat;
 }
@@ -170,24 +172,53 @@ async function policyChooseBid(players, currentBid, perspectiveIdx, history, tot
   return { action: 'bid', q: b.q, f: b.f };
 }
 
-// ── High-level: the AI's show-reroll decision (skip vs reveal-all) ──
+// ── High-level: the AI's show-reroll decision ─────────────────────
+// Returns a Set<number> of hand indices to reveal, or null for skip.
+//
+// Action space (up to 3 options, in this order):
+//   0  skip
+//   1  reveal-all-supporters (1s + bid-face dice), reroll the rest
+//      — only when 1 ≤ |supporters| < |hidden|
+//   2  reveal one non-supporter (the first by hand index), reroll the rest
+//      — only when ≥1 non-supporter exists. Useful in the desperate case
+//      where the bidder believes the previous bid is correct but no
+//      higher bid is, so they raise by exactly one and gamble on a fresh
+//      reroll of the rest.
 async function policyChooseShowReroll(players, bid, perspectiveIdx) {
   const me = players[perspectiveIdx];
   const hidden = me.dice
-    .map((d, i) => ({ ...d, i }))
-    .filter((d) => !d.revealed);
-  if (hidden.length < 2) return false;
-  const supporters = hidden.filter((d) => supportsBid(d.face, bid.f));
-  if (supporters.length === 0 || supporters.length === hidden.length) return false;
+    .map((d, i) => ({ d, i }))
+    .filter(({ d }) => !d.revealed);
+  if (hidden.length < 2) return null;
 
-  const supportFaces = supporters.map((d) => d.face);
-  // bidderIdx for the obs is the AI itself (just made the bid), but for
-  // a show-reroll prompt the engine encodes is_show_reroll_phase=true so
-  // the bidder field still describes the standing bid.
-  const obs = encodeObs(players, perspectiveIdx, bid, perspectiveIdx, /*sr*/ true);
-  const feats = showRerollMoveFeatures(supportFaces, /*hasRevealOption*/ true);
-  const scores = await _scoreMoves(obs, feats, 2);
-  return _argmax(scores) === 1;   // 1 = reveal-and-reroll
+  const supporters    = hidden.filter(({ d }) => supportsBid(d.face, bid.f));
+  const nonSupporters = hidden.filter(({ d }) => !supportsBid(d.face, bid.f));
+
+  const options = [{ kind: 'skip', indices: new Set(), faces: [] }];
+  if (supporters.length > 0 && supporters.length < hidden.length) {
+    options.push({
+      kind:    'all-supporters',
+      indices: new Set(supporters.map((s) => s.i)),
+      faces:   supporters.map((s) => s.d.face),
+    });
+  }
+  if (nonSupporters.length > 0) {
+    const first = nonSupporters[0];
+    options.push({
+      kind:    'one-non-supporter',
+      indices: new Set([first.i]),
+      faces:   [first.d.face],
+    });
+  }
+  if (options.length === 1) return null;   // only skip is possible
+
+  // bidderIdx for the obs is the AI itself (just made the bid).
+  const obs   = encodeObs(players, perspectiveIdx, bid, perspectiveIdx, /*sr*/ true);
+  const feats = showRerollMoveFeatures(options.map((o) => o.faces));
+  const scores = await _scoreMoves(obs, feats, options.length);
+  const pick = _argmax(scores);
+  const chosen = options[pick];
+  return chosen.kind === 'skip' ? null : chosen.indices;
 }
 
 Object.assign(window, {
