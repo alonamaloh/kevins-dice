@@ -36,8 +36,11 @@ function BidLabel({ q, f, color = '#111', q_size = 14, die_size = 13 }) {
 //   cols 2..6 (faces 2..6): q = e
 // Puts 3×1s in the same row as 6×2s, 6×3s, etc.
 function GridPanel({ players, currentBid, totalDice, history, onCommitBid, disabled }) {
+  // Effective counts up to totalDice cover faces 2–6 (q ≤ totalDice). The
+  // 1s column needs to extend to effective = 2 × totalDice so a bid of
+  // every-die-is-a-1 (q = totalDice, eff = 2·totalDice) is reachable.
   const rows = [];
-  for (let e = 1; e <= totalDice; e++) rows.push(e);
+  for (let e = 1; e <= totalDice * 2; e++) rows.push(e);
 
   const scrollerRef = React.useRef(null);
   React.useEffect(() => {
@@ -52,6 +55,8 @@ function GridPanel({ players, currentBid, totalDice, history, onCommitBid, disab
       if (e % 2 !== 0) return null;
       return { q: e / 2, f: 1 };
     }
+    // Faces 2–6: q = e, only meaningful while q ≤ totalDice.
+    if (e > totalDice) return null;
     return { q: e, f };
   }
 
