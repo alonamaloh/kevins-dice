@@ -2,9 +2,12 @@
 // playRollSound(n) lays down `n` short noise bursts over a span scaled
 // to `n`, so a 20-die round-start sounds like a clatter and a 2-die
 // reroll sounds like a click or two.
+//
+// The splash-screen "Start game" tap satisfies iOS Safari's
+// user-gesture requirement before the first round-start sound fires,
+// so no queueing or special-case bootstrap is needed.
 
 let _ctx = null;
-const _pending = [];   // numDice values queued before audio is unlocked
 
 function _ensureCtx() {
   if (_ctx) return _ctx;
@@ -14,21 +17,12 @@ function _ensureCtx() {
   return _ctx;
 }
 
-async function _unlockOnGesture() {
+// First pointerdown anywhere on the page creates / resumes the
+// AudioContext. Subsequent taps reuse the same one.
+document.addEventListener('pointerdown', () => {
   const ctx = _ensureCtx();
-  if (!ctx) return;
-  if (ctx.state === 'suspended') {
-    try { await ctx.resume(); } catch {}
-  }
-  // Drain any queued round-start / show-reroll clatter so the user hears
-  // sounds that fired before they had a chance to interact.
-  while (_pending.length) _doPlay(_pending.shift());
-}
-
-// iOS Safari requires the AudioContext to be created/resumed during a
-// user gesture. Hook the first pointerdown anywhere on the page to do
-// that — after one tap, sounds play freely.
-document.addEventListener('pointerdown', _unlockOnGesture, { once: true });
+  if (ctx && ctx.state === 'suspended') ctx.resume();
+}, { once: true });
 
 function _scheduleClick(ctx, when, intensity = 1) {
   // Decaying noise burst, band-pass-filtered around 1.5–3 kHz so it
@@ -54,8 +48,8 @@ function _scheduleClick(ctx, when, intensity = 1) {
   src.stop(when + dur);
 }
 
-function _doPlay(numDice) {
-  const ctx = _ctx;
+function playRollSound(numDice) {
+  const ctx = _ensureCtx();
   if (!ctx || ctx.state !== 'running') return;
   const n = Math.max(1, Math.floor(numDice));
   // Span scales with count, capped so even 20-die rounds finish quickly.
@@ -68,17 +62,6 @@ function _doPlay(numDice) {
     const t = now + Math.pow(r, 0.7) * span;
     _scheduleClick(ctx, t, 0.6 + Math.random() * 0.4);
   }
-}
-
-function playRollSound(numDice) {
-  const ctx = _ensureCtx();
-  if (!ctx) return;
-  if (ctx.state !== 'running') {
-    // Pre-gesture (iOS): queue this; the first pointerdown drains it.
-    _pending.push(numDice);
-    return;
-  }
-  _doPlay(numDice);
 }
 
 Object.assign(window, { playRollSound });

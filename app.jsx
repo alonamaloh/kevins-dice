@@ -26,16 +26,21 @@ function rerollHidden(dice) {
 }
 function clearAllReveals(dice) { return dice.map((d) => ({ face: d.face, revealed: false })); }
 
-function makeInitialState() {
+function makeInitialState({ splash = false } = {}) {
+  // Random opening seat — keeps the human from always going first.
+  const startIdx = Math.floor(Math.random() * PLAYERS.length);
   return {
     players: PLAYERS.map((p) => ({ ...p, alive: true, dice: freshHand(STARTING_DICE) })),
-    turnIdx: 0, // index into players (regardless of alive — we skip dead ones in advance)
-    starterId: 'you',
+    turnIdx: startIdx,
+    starterId: PLAYERS[startIdx].id,
     bid: null,
     history: [], // [{playerId, q, f}]
     selection: [], // indices in YOUR own dice the user has tapped to mark for show-reroll
-    phase: 'bid', // 'bid' | 'challenge' | 'roundEnd' | 'gameOver'
-    challenge: null, // {actual, threshold, bidderWins, bidderId, challengerId}
+    // 'splash' is the first-load gate (lets us collect a user gesture
+    // before any audio plays). 'bid' | 'roundEnd' | 'gameOver' are the
+    // gameplay states.
+    phase: splash ? 'splash' : 'bid',
+    challenge: null,
     roundLog: [],
   };
 }
@@ -54,7 +59,7 @@ function indexOfPlayer(players, id) { return players.findIndex((p) => p.id === i
 // App
 // ─────────────────────────────────────────────────────────────
 function App() {
-  const [state, setState] = React.useState(makeInitialState);
+  const [state, setState] = React.useState(() => makeInitialState({ splash: true }));
   const stateRef = React.useRef(state);
   React.useEffect(() => { stateRef.current = state; }, [state]);
 
@@ -251,6 +256,7 @@ function App() {
   }
 
   function newGame() { setState(makeInitialState()); }
+  function startFromSplash() { setState((s) => ({ ...s, phase: 'bid' })); }
 
   // ── Human helpers ─────────────────────────────────────────
   function toggleSelect(idx) {
@@ -298,7 +304,40 @@ function App() {
 
   // ── Render ────────────────────────────────────────────────
   // Order players for display: AI on top in turn order, human on bottom.
-  // Reorder as: kevin, mira, jules, you (already that order in PLAYERS).
+
+  if (state.phase === 'splash') {
+    return (
+      <div style={{
+        height: '100dvh', display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center', gap: 18,
+        background: '#F4F1EC', color: '#111',
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        fontFamily: '-apple-system, system-ui, sans-serif',
+      }}>
+        <div style={{
+          fontSize: 11, color: 'rgba(0,0,0,0.45)', fontWeight: 600,
+          textTransform: 'uppercase', letterSpacing: 1.2,
+        }}>
+          Kevin's Dice
+        </div>
+        <div style={{
+          fontSize: 28, fontWeight: 700, letterSpacing: -0.3, textAlign: 'center',
+          maxWidth: 320, padding: '0 16px',
+        }}>
+          A Liar's Dice variant.<br />Wild 1s. Show and reroll.
+        </div>
+        <button
+          onClick={startFromSplash}
+          style={{
+            marginTop: 16, padding: '14px 36px', borderRadius: 14,
+            border: 'none', background: '#111', color: '#fff',
+            fontSize: 18, fontWeight: 700, cursor: 'pointer',
+          }}
+        >Start game</button>
+      </div>
+    );
+  }
 
   const total = totalDice(state.players);
 
