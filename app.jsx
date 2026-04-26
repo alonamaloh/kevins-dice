@@ -83,6 +83,16 @@ function App() {
     }
   }, [state.phase, state.starterId]);
 
+  // Auto-advance round-end when the human is out: spectating doesn't
+  // benefit from manual pacing. Brief pause so the result is readable.
+  React.useEffect(() => {
+    if (state.phase !== 'roundEnd') return;
+    const human = state.players.find((p) => p.isHuman);
+    if (human && human.alive) return;
+    const t = setTimeout(() => startNextRound(), 1000);
+    return () => clearTimeout(t);
+  }, [state.phase, state.starterId]);
+
   // ── AI driver: when it's an AI's turn, compute and apply move after a beat.
   React.useEffect(() => {
     if (state.phase !== 'bid') return;
