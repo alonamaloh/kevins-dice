@@ -187,7 +187,14 @@ function App() {
       const result = resolveChallenge(s.players, s.bid);
       const bidder = s.history[s.history.length - 1];
       const bidderId = bidder.playerId;
+      const isEquality = result.actual === result.threshold;
+      // On equality the bidder still "wins" (≥ q), but it's a special
+      // transfer: challenger gives one die to bidder.
       const loserId = result.bidderWins ? challengerId : bidderId;
+      const winnerId = result.bidderWins ? bidderId : challengerId;
+      const lossAmount = isEquality
+        ? 1                                             // transfer, not loss
+        : Math.abs(result.actual - result.threshold);
 
       // Reveal everything for the dramatic moment.
       const players = s.players.map((p) => ({
@@ -195,31 +202,50 @@ function App() {
       }));
       return {
         ...s, players, phase: 'roundEnd',
-        challenge: { ...result, bidderId, challengerId, loserId, bid: s.bid },
+        challenge: {
+          ...result, bidderId, challengerId, loserId, winnerId,
+          isEquality, lossAmount, bid: s.bid,
+        },
       };
     });
   }
 
   function startNextRound() {
     setState((s) => {
-      // Loser drops a die.
-      const players = s.players.map((p) => ({ ...p }));
+      const players = s.players.map((p) => ({ ...p, dice: p.dice.map((d) => ({ ...d })) }));
       const ch = s.challenge;
-      const loser = players.find((p) => p.id === ch.loserId);
-      loser.dice = loser.dice.slice(0, Math.max(0, loser.dice.length - 1));
-      if (loser.dice.length === 0) loser.alive = false;
+
+      if (ch.isEquality) {
+        // Challenger transfers one die to bidder.
+        const challenger = players.find((p) => p.id === ch.challengerId);
+        const bidder    = players.find((p) => p.id === ch.bidderId);
+        if (challenger.dice.length > 0) {
+          challenger.dice = challenger.dice.slice(0, challenger.dice.length - 1);
+          // The face doesn't matter — every alive player rerolls below —
+          // but keep the array shape consistent.
+          bidder.dice = [...bidder.dice, { face: rollDie(), revealed: false }];
+        }
+      } else {
+        // Loser loses |actual - threshold| dice (capped at their pool).
+        const loser = players.find((p) => p.id === ch.loserId);
+        const newSize = Math.max(0, loser.dice.length - ch.lossAmount);
+        loser.dice = loser.dice.slice(0, newSize);
+      }
+
+      // Eliminate any player at 0 dice.
+      players.forEach((p) => { if (p.dice.length === 0) p.alive = false; });
 
       const aliveCount = players.filter((p) => p.alive).length;
       if (aliveCount <= 1) {
-        // Reveal final state, mark game over.
         return { ...s, players, phase: 'gameOver', bid: null, history: [], challenge: s.challenge };
       }
 
       // Re-roll everyone.
       players.forEach((p) => { if (p.alive) p.dice = freshHand(p.dice.length); });
 
-      // Loser starts next round (or next alive after loser if loser eliminated).
-      let starterIdx = indexOfPlayer(players, ch.loserId);
+      // Winner of the challenge starts the next round (always alive,
+      // since they didn't lose any dice).
+      let starterIdx = indexOfPlayer(players, ch.winnerId);
       if (!players[starterIdx].alive) starterIdx = nextAlive(players, starterIdx);
 
       return {
@@ -428,6 +454,14 @@ function ChallengeBanner({ state }) {
   const bidder = PLAYERS.find((p) => p.id === ch.bidderId);
   const challenger = PLAYERS.find((p) => p.id === ch.challengerId);
   const loser = PLAYERS.find((p) => p.id === ch.loserId);
+  const verb = (p, plural, sing) => p.isHuman ? plural : sing;
+  let outcome;
+  if (ch.isEquality) {
+    outcome = `${challenger.name} ${verb(challenger, 'give', 'gives')} a die to ${bidder.name}`;
+  } else {
+    const n = ch.lossAmount;
+    outcome = `${loser.name} ${verb(loser, 'lose', 'loses')} ${n} ${n === 1 ? 'die' : 'dice'}`;
+  }
   return (
     <div style={{
       margin: '6px 14px', padding: '10px 14px', borderRadius: 14,
@@ -438,7 +472,7 @@ function ChallengeBanner({ state }) {
         {challenger.name} called liar on {bidder.name}'s {ch.bid.q}× {faceGlyph(ch.bid.f)}
       </div>
       <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.2 }}>
-        {ch.actual} actual · needed {ch.threshold} → {loser.name} {loser.isHuman ? 'lose' : 'loses'} a die
+        {ch.actual} actual · needed {ch.threshold} → {outcome}
         {state.phase === 'gameOver' ? (() => {
           const w = state.players.find((p) => p.alive);
           return w ? ` · ${w.name} ${w.isHuman ? 'win' : 'wins'}!` : '';

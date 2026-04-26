@@ -19,8 +19,14 @@ When liar is called, all dice are revealed and the bid is scored:
 - The bid `q × f` is satisfied if at least `q` dice show face `f`.
 - **1s are wild** — they count as `f` whenever `f ≠ 1`. (When the bid face
   *is* 1, only literal 1s count.)
-- If the bid is met, the **challenger** loses a die. Otherwise the **bidder**
-  loses a die. A player at zero dice is eliminated. Last player standing wins.
+- The amount that changes hands is `|actual − q|`:
+  - If `actual > q`, the **challenger** loses `actual − q` dice (gone, not
+    transferred).
+  - If `actual < q`, the **bidder** loses `q − actual` dice.
+  - If `actual == q` exactly, the **challenger transfers one die** to the
+    bidder.
+- A player at zero dice is eliminated. Last player standing wins.
+- The **winner of the challenge** opens the next round.
 
 ### Bid ordering
 
