@@ -312,40 +312,7 @@ function App() {
   // Order players for display: AI on top in turn order, human on bottom.
 
   if (state.phase === 'splash') {
-    return (
-      <div style={{
-        height: '100dvh', display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', gap: 24,
-        // Match the photo's center beige so the masked edges blend in.
-        background: '#F2EFE9', color: '#111',
-        paddingTop: 'env(safe-area-inset-top)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        fontFamily: '-apple-system, system-ui, sans-serif',
-      }}>
-        <div style={{ fontSize: 32, fontWeight: 700, color: '#111' }}>
-          Kevin's Dice
-        </div>
-        <img
-          src="splash-dice-photo.png"
-          alt="Four colorful dice"
-          style={{
-            width: '70%', maxWidth: 320, height: 'auto',
-            // Soft elliptical fade so the photo dissolves into the bg
-            // instead of sitting in a hard rectangle.
-            WebkitMaskImage: 'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
-            maskImage:       'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
-          }}
-        />
-        <button
-          onClick={startFromSplash}
-          style={{
-            padding: '14px 36px', borderRadius: 14,
-            border: 'none', background: '#111', color: '#fff',
-            fontSize: 18, fontWeight: 700, cursor: 'pointer',
-          }}
-        >Start game</button>
-      </div>
-    );
+    return <SplashScreen onStart={startFromSplash} />;
   }
 
   const total = totalDice(state.players);
@@ -486,6 +453,54 @@ function App() {
         @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
         @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
       `}</style>
+    </div>
+  );
+}
+
+function SplashScreen({ onStart }) {
+  // Render the beige background immediately, but keep the title +
+  // photo + button hidden until the dice photo has finished loading.
+  // Then fade them in together so the page never flashes a half-loaded
+  // image.
+  const [ready, setReady] = React.useState(false);
+  // Safety net: if the image somehow never fires onLoad (cached error
+  // path, blocked, etc.) reveal the splash anyway after a short delay.
+  React.useEffect(() => {
+    const t = setTimeout(() => setReady(true), 1500);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div style={{
+      height: '100dvh', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 24,
+      background: '#F2EFE9', color: '#111',
+      paddingTop: 'env(safe-area-inset-top)',
+      paddingBottom: 'env(safe-area-inset-bottom)',
+      fontFamily: '-apple-system, system-ui, sans-serif',
+      opacity: ready ? 1 : 0,
+      transition: 'opacity 220ms ease-out',
+    }}>
+      <div style={{ fontSize: 32, fontWeight: 700, color: '#111' }}>
+        Kevin's Dice
+      </div>
+      <img
+        src="splash-dice-photo.png"
+        alt="Four colorful dice"
+        onLoad={() => setReady(true)}
+        style={{
+          width: '70%', maxWidth: 320, height: 'auto',
+          WebkitMaskImage: 'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
+          maskImage:       'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
+        }}
+      />
+      <button
+        onClick={onStart}
+        style={{
+          padding: '14px 36px', borderRadius: 14,
+          border: 'none', background: '#111', color: '#fff',
+          fontSize: 18, fontWeight: 700, cursor: 'pointer',
+        }}
+      >Start game</button>
     </div>
   );
 }
