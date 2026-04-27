@@ -56,12 +56,32 @@ function nextAlive(players, fromIdx) {
 function indexOfPlayer(players, id) { return players.findIndex((p) => p.id === id); }
 
 // ─────────────────────────────────────────────────────────────
+// Orientation hook — landscape when window is wider than tall.
+// ─────────────────────────────────────────────────────────────
+function useIsLandscape() {
+  const get = () => typeof window !== 'undefined' && window.innerWidth > window.innerHeight;
+  const [v, setV] = React.useState(get);
+  React.useEffect(() => {
+    const onResize = () => setV(get());
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+  return v;
+}
+
+// ─────────────────────────────────────────────────────────────
 // App
 // ─────────────────────────────────────────────────────────────
 function App() {
   const [state, setState] = React.useState(() => makeInitialState({ splash: true }));
   const stateRef = React.useRef(state);
   React.useEffect(() => { stateRef.current = state; }, [state]);
+
+  const isLandscape = useIsLandscape();
 
   const me = state.players.find((p) => p.isHuman);
   const myColor = me.color;
@@ -309,10 +329,8 @@ function App() {
   }
 
   // ── Render ────────────────────────────────────────────────
-  // Order players for display: AI on top in turn order, human on bottom.
-
   if (state.phase === 'splash') {
-    return <SplashScreen onStart={startFromSplash} />;
+    return <SplashScreen onStart={startFromSplash} isLandscape={isLandscape} />;
   }
 
   const total = totalDice(state.players);
@@ -321,134 +339,187 @@ function App() {
   const lastBidByPlayer = {};
   for (const h of state.history) lastBidByPlayer[h.playerId] = { q: h.q, f: h.f };
 
-  const myDraftBid = null; // handled inside panel
-
-  return (
+  // ── Reusable blocks (rendered identically in portrait & landscape) ──
+  const headerEl = (
     <div style={{
-      height: '100dvh',
-      display: 'flex', flexDirection: 'column',
-      background: '#F4F1EC', color: '#111',
-      overflow: 'hidden',
-      paddingTop: 'env(safe-area-inset-top)',
-      paddingBottom: 'env(safe-area-inset-bottom)',
-      fontFamily: '-apple-system, system-ui, sans-serif',
+      padding: '8px 18px 4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      flexShrink: 0,
     }}>
-        <div style={{
-          flex: 1, display: 'flex', flexDirection: 'column',
-          background: '#F4F1EC',
-          color: '#111',
-          minHeight: 0,
-        }}>
-          {/* Header bar */}
-          <div style={{
-            padding: '8px 18px 4px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          }}>
-            <div>
-              <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', fontWeight: 600,
-                textTransform: 'uppercase', letterSpacing: 1 }}>Kevin's Dice</div>
-              <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.3, marginTop: 1 }}>
-                {state.phase === 'gameOver' ? 'Game over' :
-                  isMyTurn ? 'Your turn' : `${currentPlayer.name}'s turn`}
-              </div>
-            </div>
-            <button onClick={newGame} style={{
-              border: 'none', background: 'rgba(0,0,0,0.05)', borderRadius: 999,
-              padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: '#111',
-            }}>New game</button>
-          </div>
-
-          {/* Players area — natural height, doesn't grow. Bid panel
-              below takes the remaining space. */}
-          <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '6px 10px 0', gap: 2 }}>
-            {state.players.filter((p) => !p.isHuman).map((p) => {
-              const lastBidder = state.history[state.history.length - 1];
-              const isStanding = !!lastBidder && lastBidder.playerId === p.id;
-              return (
-                <PlayerRow
-                  key={p.id}
-                  player={p}
-                  isYou={false}
-                  isActive={state.players[state.turnIdx]?.id === p.id && state.phase === 'bid'}
-                  lastBid={lastBidByPlayer[p.id] || null}
-                  revealAll={state.phase === 'roundEnd' || state.phase === 'gameOver'}
-                  dieSize={36}
-                  isStandingBid={isStanding && isMyTurn}
-                  onChallenge={isStanding && isMyTurn ? humanCallLiar : undefined}
-                />
-              );
-            })}
-
-            {/* Round result banner */}
-            {(state.phase === 'roundEnd' || state.phase === 'gameOver') && (
-              <ChallengeBanner state={state} />
-            )}
-
-            {/* Your row — same style as opponents, no big separator */}
-            <PlayerRow
-              player={me}
-              isYou={true}
-              isActive={isMyTurn}
-              lastBid={lastBidByPlayer['you'] || null}
-              revealAll={state.phase === 'roundEnd' || state.phase === 'gameOver'}
-              selection={state.selection}
-              onToggleSelect={isMyTurn ? toggleSelect : undefined}
-              dieSize={36}
-            />
-            {/* Show-reroll hint */}
-            {isMyTurn && (
-              <div style={{
-                margin: '4px 14px 6px', padding: '8px 12px', borderRadius: 10,
-                fontSize: 16, lineHeight: 1.3,
-                color: state.selectBlockedAt ? '#A35200' : 'rgba(0,0,0,0.7)',
-                background: state.selectBlockedAt ? 'rgba(250,204,21,0.22)'
-                  : state.selection.length ? hexA(myColor, 0.08) : 'transparent',
-                fontWeight: state.selectBlockedAt ? 600 : 500,
-                transition: 'background 200ms, color 200ms',
-              }}>
-                {state.selectBlockedAt ? (
-                  <>You have to keep at least one die hidden.</>
-                ) : state.selection.length ? (
-                  <>Showing {state.selection.length} die{state.selection.length === 1 ? '' : 'ce'} on bid — reroll the rest after committing.</>
-                ) : state.bid ? (
-                  <>Tap your dice to mark them for show-and-reroll, then raise.</>
-                ) : (
-                  <>You're opening this round. Tap dice to show on your opening bid, then pick one below.</>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Bid panel */}
-          {state.phase === 'bid' && (
-            <div style={{
-              borderTop: '1px solid rgba(0,0,0,0.06)',
-              background: '#fff',
-              flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
-            }}>
-              <BidPanel
-                players={state.players}
-                currentBid={state.bid}
-                totalDice={total}
-                history={state.history}
-                onCommitBid={humanCommitBid}
-                myColor={myColor}
-                disabled={!isMyTurn}
-              />
-            </div>
-          )}
-          {(state.phase === 'roundEnd' || state.phase === 'gameOver') && (
-            <div style={{
-              borderTop: '1px solid rgba(0,0,0,0.06)', padding: 16, background: '#fff',
-            }}>
-              {state.phase === 'gameOver' ? (
-                <button onClick={newGame} style={primaryBtnStyle}>New game</button>
-              ) : (
-                <button onClick={startNextRound} style={primaryBtnStyle}>Next round →</button>
-              )}
-            </div>
-          )}
+      <div>
+        <div style={{ fontSize: 11, color: 'rgba(0,0,0,0.45)', fontWeight: 600,
+          textTransform: 'uppercase', letterSpacing: 1 }}>Kevin's Dice</div>
+        <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.3, marginTop: 1 }}>
+          {state.phase === 'gameOver' ? 'Game over' :
+            isMyTurn ? 'Your turn' : `${currentPlayer.name}'s turn`}
         </div>
+      </div>
+      <button onClick={newGame} style={{
+        border: 'none', background: 'rgba(0,0,0,0.05)', borderRadius: 999,
+        padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: '#111',
+      }}>New game</button>
+    </div>
+  );
 
+  const opponentRows = state.players.filter((p) => !p.isHuman).map((p) => {
+    const lastBidder = state.history[state.history.length - 1];
+    const isStanding = !!lastBidder && lastBidder.playerId === p.id;
+    return (
+      <PlayerRow
+        key={p.id}
+        player={p}
+        isYou={false}
+        isActive={state.players[state.turnIdx]?.id === p.id && state.phase === 'bid'}
+        lastBid={lastBidByPlayer[p.id] || null}
+        revealAll={state.phase === 'roundEnd' || state.phase === 'gameOver'}
+        dieSize={36}
+        isStandingBid={isStanding && isMyTurn}
+        onChallenge={isStanding && isMyTurn ? humanCallLiar : undefined}
+      />
+    );
+  });
+
+  const yourRow = (
+    <PlayerRow
+      player={me}
+      isYou={true}
+      isActive={isMyTurn}
+      lastBid={lastBidByPlayer['you'] || null}
+      revealAll={state.phase === 'roundEnd' || state.phase === 'gameOver'}
+      selection={state.selection}
+      onToggleSelect={isMyTurn ? toggleSelect : undefined}
+      dieSize={36}
+    />
+  );
+
+  const banner = (state.phase === 'roundEnd' || state.phase === 'gameOver') && (
+    <ChallengeBanner state={state} />
+  );
+
+  const hint = isMyTurn && (
+    <div style={{
+      margin: '4px 14px 6px', padding: '8px 12px', borderRadius: 10,
+      fontSize: 16, lineHeight: 1.3,
+      color: state.selectBlockedAt ? '#A35200' : 'rgba(0,0,0,0.7)',
+      background: state.selectBlockedAt ? 'rgba(250,204,21,0.22)'
+        : state.selection.length ? hexA(myColor, 0.08) : 'transparent',
+      fontWeight: state.selectBlockedAt ? 600 : 500,
+      transition: 'background 200ms, color 200ms',
+    }}>
+      {state.selectBlockedAt ? (
+        <>You have to keep at least one die hidden.</>
+      ) : state.selection.length ? (
+        <>Showing {state.selection.length} die{state.selection.length === 1 ? '' : 'ce'} on bid — reroll the rest after committing.</>
+      ) : state.bid ? (
+        <>Tap your dice to mark them for show-and-reroll, then raise.</>
+      ) : (
+        <>You're opening this round. Tap dice to show on your opening bid, then pick one below.</>
+      )}
+    </div>
+  );
+
+  const bidPanelEl = state.phase === 'bid' && (
+    <BidPanel
+      players={state.players}
+      currentBid={state.bid}
+      totalDice={total}
+      history={state.history}
+      onCommitBid={humanCommitBid}
+      myColor={myColor}
+      disabled={!isMyTurn}
+    />
+  );
+
+  const actionBtnEl = (state.phase === 'roundEnd' || state.phase === 'gameOver') && (
+    state.phase === 'gameOver'
+      ? <button onClick={newGame} style={primaryBtnStyle}>New game</button>
+      : <button onClick={startNextRound} style={primaryBtnStyle}>Next round →</button>
+  );
+
+  const playersBlock = (
+    <>
+      {opponentRows}
+      {banner}
+      {yourRow}
+      {hint}
+    </>
+  );
+
+  const pageStyle = {
+    height: '100dvh',
+    display: 'flex', flexDirection: 'column',
+    background: '#F4F1EC', color: '#111',
+    overflow: 'hidden',
+    paddingTop: 'env(safe-area-inset-top)',
+    paddingBottom: 'env(safe-area-inset-bottom)',
+    fontFamily: '-apple-system, system-ui, sans-serif',
+  };
+
+  if (isLandscape) {
+    return (
+      <div style={pageStyle}>
+        {headerEl}
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          {/* LEFT: dice + last bids */}
+          <div style={{
+            flex: 1, minWidth: 0, minHeight: 0,
+            display: 'flex', flexDirection: 'column',
+            padding: '4px 10px 0', gap: 2, overflow: 'auto',
+          }}>
+            {playersBlock}
+          </div>
+          {/* RIGHT: bid panel / round-end action */}
+          <div style={{
+            width: 'min(46%, 420px)', flexShrink: 0,
+            display: 'flex', flexDirection: 'column', minHeight: 0,
+            borderLeft: '1px solid rgba(0,0,0,0.06)',
+            background: '#fff',
+          }}>
+            {bidPanelEl && (
+              <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+                {bidPanelEl}
+              </div>
+            )}
+            {actionBtnEl && (
+              <div style={{ padding: 16, marginTop: 'auto' }}>{actionBtnEl}</div>
+            )}
+          </div>
+        </div>
+        <style>{`
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+          @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
+        `}</style>
+      </div>
+    );
+  }
+
+  // Portrait
+  return (
+    <div style={pageStyle}>
+      <div style={{
+        flex: 1, display: 'flex', flexDirection: 'column',
+        background: '#F4F1EC', color: '#111', minHeight: 0,
+      }}>
+        {headerEl}
+        <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', padding: '6px 10px 0', gap: 2 }}>
+          {playersBlock}
+        </div>
+        {bidPanelEl && (
+          <div style={{
+            borderTop: '1px solid rgba(0,0,0,0.06)',
+            background: '#fff',
+            flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column',
+          }}>
+            {bidPanelEl}
+          </div>
+        )}
+        {actionBtnEl && (
+          <div style={{
+            borderTop: '1px solid rgba(0,0,0,0.06)', padding: 16, background: '#fff',
+          }}>
+            {actionBtnEl}
+          </div>
+        )}
+      </div>
       <style>{`
         @keyframes fadeIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
         @keyframes pop { from { transform: scale(0.9); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -457,7 +528,7 @@ function App() {
   );
 }
 
-function SplashScreen({ onStart }) {
+function SplashScreen({ onStart, isLandscape }) {
   // Render the beige background immediately, but keep the title +
   // photo + button hidden until the dice photo has finished loading.
   // Then fade them in together so the page never flashes a half-loaded
@@ -469,6 +540,63 @@ function SplashScreen({ onStart }) {
     const t = setTimeout(() => setReady(true), 1500);
     return () => clearTimeout(t);
   }, []);
+
+  const photoMask = {
+    WebkitMaskImage: 'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
+    maskImage:       'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
+  };
+
+  if (isLandscape) {
+    return (
+      <div style={{
+        height: '100dvh', display: 'flex', flexDirection: 'row',
+        background: '#F2EFE9', color: '#111',
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        fontFamily: '-apple-system, system-ui, sans-serif',
+        opacity: ready ? 1 : 0,
+        transition: 'opacity 220ms ease-out',
+        overflow: 'hidden',
+      }}>
+        {/* LEFT — dice photo */}
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: '24px 12px 24px 24px', minWidth: 0,
+        }}>
+          <img
+            src="splash-dice-photo.png"
+            alt="Four colorful dice"
+            onLoad={() => setReady(true)}
+            style={{
+              maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto',
+              display: 'block',
+              ...photoMask,
+            }}
+          />
+        </div>
+        {/* RIGHT — title + Start button */}
+        <div style={{
+          flex: 1, display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center',
+          gap: 24, padding: '24px 32px',
+        }}>
+          <div style={{ fontSize: 40, fontWeight: 700, color: '#111', textAlign: 'center' }}>
+            Kevin's Dice
+          </div>
+          <button
+            onClick={onStart}
+            style={{
+              padding: '14px 36px', borderRadius: 14,
+              border: 'none', background: '#111', color: '#fff',
+              fontSize: 18, fontWeight: 700, cursor: 'pointer',
+            }}
+          >Start game</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Portrait
   return (
     <div style={{
       height: '100dvh', display: 'flex', flexDirection: 'column',
@@ -489,8 +617,7 @@ function SplashScreen({ onStart }) {
         onLoad={() => setReady(true)}
         style={{
           width: '70%', maxWidth: 320, height: 'auto',
-          WebkitMaskImage: 'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
-          maskImage:       'radial-gradient(ellipse 70% 70% at 50% 45%, #000 55%, transparent 100%)',
+          ...photoMask,
         }}
       />
       <button
