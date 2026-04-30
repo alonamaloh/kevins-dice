@@ -20,17 +20,27 @@ const PLAYERS = [
 const STARTING_DICE = 5;
 
 function rollDie() { return Math.floor(Math.random() * 6) + 1; }
-function freshHand(n) { return Array.from({ length: n }, () => ({ face: rollDie(), revealed: false })); }
-function rerollHidden(dice) {
-  return dice.map((d) => d.revealed ? d : { face: rollDie(), revealed: false });
+// `rolledAt` timestamps freshly-rolled dice so the <Die> component can
+// run a brief flicker+tilt animation when the value changes. Pre-game
+// (splash) dice carry `rolledAt: 0` so they sit still until the first
+// real roll stamps them.
+function freshHand(n, rolledAt = Date.now()) {
+  return Array.from({ length: n }, () => ({ face: rollDie(), revealed: false, rolledAt }));
 }
-function clearAllReveals(dice) { return dice.map((d) => ({ face: d.face, revealed: false })); }
+function rerollHidden(dice) {
+  const t = Date.now();
+  return dice.map((d) => d.revealed ? d : { face: rollDie(), revealed: false, rolledAt: t });
+}
+function clearAllReveals(dice) { return dice.map((d) => ({ face: d.face, revealed: false, rolledAt: d.rolledAt })); }
 
 function makeInitialState({ splash = false } = {}) {
   // Random opening seat — keeps the human from always going first.
   const startIdx = Math.floor(Math.random() * PLAYERS.length);
+  // On the splash screen suppress the roll animation: pass rolledAt=0 so
+  // the dice render statically until the player actually starts the game.
+  const initialRolledAt = splash ? 0 : Date.now();
   return {
-    players: PLAYERS.map((p) => ({ ...p, alive: true, dice: freshHand(STARTING_DICE) })),
+    players: PLAYERS.map((p) => ({ ...p, alive: true, dice: freshHand(STARTING_DICE, initialRolledAt) })),
     turnIdx: startIdx,
     starterId: PLAYERS[startIdx].id,
     bid: null,
@@ -177,9 +187,10 @@ function App() {
       const actor = players[pIdx];
 
       if (willReveal) {
+        const t = Date.now();
         actor.dice = actor.dice.map((d, i) => {
           if (revealHandIndices.has(i)) return { ...d, revealed: true };
-          if (!d.revealed) return { face: rollDie(), revealed: false };
+          if (!d.revealed) return { face: rollDie(), revealed: false, rolledAt: t };
           return d;
         });
       }
@@ -240,7 +251,7 @@ function App() {
           challenger.dice = challenger.dice.slice(0, challenger.dice.length - 1);
           // The face doesn't matter — every alive player rerolls below —
           // but keep the array shape consistent.
-          bidder.dice = [...bidder.dice, { face: rollDie(), revealed: false }];
+          bidder.dice = [...bidder.dice, { face: rollDie(), revealed: false, rolledAt: Date.now() }];
         }
       } else {
         // Loser loses |actual - threshold| dice (capped at their pool).
@@ -281,7 +292,15 @@ function App() {
     // wait for the AudioContext to be running before kicking off the
     // round (its very first event is the dice-roll clatter).
     await unlockAudio();
-    setState((s) => ({ ...s, phase: 'bid' }));
+    setState((s) => {
+      // Stamp every die with rolledAt=now so the splash transition
+      // triggers the same flicker+tilt as a normal round-start roll.
+      const t = Date.now();
+      const players = s.players.map((p) => ({
+        ...p, dice: p.dice.map((d) => ({ ...d, rolledAt: t })),
+      }));
+      return { ...s, players, phase: 'bid' };
+    });
   }
 
   // ── Human helpers ─────────────────────────────────────────
@@ -564,7 +583,7 @@ function SplashScreen({ onStart, isLandscape }) {
           padding: '24px 12px 24px 24px', minWidth: 0,
         }}>
           <img
-            src="splash-dice-photo.png"
+            src="kevins_dice_image.png"
             alt="Four colorful dice"
             onLoad={() => setReady(true)}
             style={{
@@ -612,7 +631,7 @@ function SplashScreen({ onStart, isLandscape }) {
         Kevin's Dice
       </div>
       <img
-        src="splash-dice-photo.png"
+        src="kevins_dice_image.png"
         alt="Four colorful dice"
         onLoad={() => setReady(true)}
         style={{
@@ -652,8 +671,10 @@ function ChallengeBanner({ state }) {
       background: '#111', color: '#fff', animation: 'pop 220ms',
       display: 'flex', flexDirection: 'column', gap: 4,
     }}>
-      <div style={{ fontSize: 11, opacity: 0.6, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase' }}>
-        {challenger.name} called liar on {bidder.name}'s {ch.bid.q}× {faceGlyph(ch.bid.f)}
+      <div style={{ fontSize: 11, opacity: 0.6, fontWeight: 600, letterSpacing: 0.6, textTransform: 'uppercase',
+                     display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+        <span>{challenger.name} called liar on {bidder.name}'s {ch.bid.q}×</span>
+        <MiniDie face={ch.bid.f} color="#fff" bg="transparent" pipColor="#fff" size={14} />
       </div>
       <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.2 }}>
         {ch.actual} actual · needed {ch.threshold} → {outcome}
@@ -665,8 +686,6 @@ function ChallengeBanner({ state }) {
     </div>
   );
 }
-
-function faceGlyph(f) { return ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'][f]; }
 
 const primaryBtnStyle = {
   width: '100%', height: 48, borderRadius: 12, border: 'none',

@@ -1,9 +1,11 @@
 // dice.jsx — Die glyph + PlayerRow.
 // Classic pip dice tinted with each player's color band.
 
-// Pip layouts (3x3 grid; 1 = pip).
+// Pip layouts (3x3 grid; 1 = pip). Face 1 is rendered as a five-pointed
+// star elsewhere — Kevin's Dice 1s are wild, and there's a real published
+// Liar's Dice set whose 1 face has a star rather than a single pip.
 const DICE_PIPS = {
-  1: [[0,0,0],[0,1,0],[0,0,0]],
+  1: [[0,0,0],[0,0,0],[0,0,0]],
   2: [[1,0,0],[0,0,0],[0,0,1]],
   3: [[1,0,0],[0,1,0],[0,0,1]],
   4: [[1,0,1],[0,0,0],[1,0,1]],
@@ -11,13 +13,54 @@ const DICE_PIPS = {
   6: [[1,0,1],[1,0,1],[1,0,1]],
 };
 
+// Regular five-pointed star, viewBox 0 0 100 100, point up.
+// Pre-computed: outer radius 48, inner radius 18.34, centered at (50,50).
+const STAR_POINTS =
+  '50,2 60.78,35.17 95.65,35.17 67.44,55.67 78.21,88.83 ' +
+  '50,68.34 21.79,88.83 32.56,55.67 4.35,35.17 39.22,35.17';
+
+function StarGlyph({ size, color }) {
+  return (
+    <svg viewBox="0 0 100 100" width={size} height={size}
+         style={{ display: 'block' }} aria-hidden="true">
+      <polygon points={STAR_POINTS} fill={color} />
+    </svg>
+  );
+}
+
 // Single die. `face`=1..6 or null (hidden). `tone` = player's color.
 // `size` = px. `state`: 'normal' | 'selected' | 'revealedPublic' | 'just-rolled' | 'dim'
-function Die({ face, tone = '#111', size = 36, state = 'normal', onClick, ariaLabel }) {
+// `rolledAt` is a millisecond timestamp; when it changes to a value within
+// the last ROLL_MS, the die runs a brief tumble animation (flicker through
+// random faces for visible dice, wobble the "?" for hidden dice).
+const ROLL_MS = 520;
+function Die({ face, tone = '#111', size = 36, state = 'normal', onClick, ariaLabel, rolledAt }) {
   const known = face != null;
   const isSelected = state === 'selected';
   const isPublic = state === 'revealedPublic';
   const isDim = state === 'dim';
+
+  const [rolling, setRolling] = React.useState(false);
+  const [flickerFace, setFlickerFace] = React.useState(face || 1);
+  const [hiddenAngle, setHiddenAngle] = React.useState(0);
+
+  React.useEffect(() => {
+    if (rolledAt == null) return;
+    const elapsed = Date.now() - rolledAt;
+    if (elapsed >= ROLL_MS) return;
+    setRolling(true);
+    const tick = setInterval(() => {
+      setFlickerFace(Math.floor(Math.random() * 6) + 1);
+      // Snap the hidden "?" to one of four cardinal orientations.
+      setHiddenAngle([0, 90, 180, 270][Math.floor(Math.random() * 4)]);
+    }, 70);
+    const stop = setTimeout(() => {
+      clearInterval(tick);
+      setRolling(false);
+      setHiddenAngle(0);
+    }, ROLL_MS - elapsed);
+    return () => { clearInterval(tick); clearTimeout(stop); };
+  }, [rolledAt]);
 
   // Solid-color die in player tone, white pips. Hidden = tinted-tone face
   // with a "?" glyph (still on-brand to the player).
@@ -46,6 +89,8 @@ function Die({ face, tone = '#111', size = 36, state = 'normal', onClick, ariaLa
 
   const r = Math.round(size * 0.22);
   const pipSize = Math.max(3, Math.round(size * 0.18));
+  const displayFace = rolling && known ? flickerFace : face;
+  const tilt = rolling ? 'rotate(-8deg) scale(0.94)' : 'rotate(0deg) scale(1)';
 
   return (
     <button
@@ -56,16 +101,28 @@ function Die({ face, tone = '#111', size = 36, state = 'normal', onClick, ariaLa
         width: size, height: size, borderRadius: r,
         background: bg, border, boxShadow: shadow,
         padding: 0, opacity, cursor: onClick ? 'pointer' : 'default',
-        position: 'relative', transition: 'transform 120ms, box-shadow 120ms, background 120ms',
+        position: 'relative',
+        transition: 'transform .25s cubic-bezier(.2,.8,.2,1), box-shadow 120ms, background 120ms',
+        transform: tilt,
       }}
     >
       {known ? (
-        <DiceFace pips={DICE_PIPS[face]} pipSize={pipSize} pipColor={pipColor} size={size} />
+        displayFace === 1 ? (
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <StarGlyph size={Math.round(size * 0.68)} color={pipColor} />
+          </div>
+        ) : (
+          <DiceFace pips={DICE_PIPS[displayFace]} pipSize={pipSize} pipColor={pipColor} size={size} />
+        )
       ) : (
         <span style={{
           position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
           color: tone, fontWeight: 600, fontSize: Math.round(size * 0.5),
           fontFamily: '-apple-system, system-ui, sans-serif',
+          transform: `rotate(${hiddenAngle}deg)`,
         }}>?</span>
       )}
     </button>
@@ -107,17 +164,26 @@ function MiniDie({ face, color = '#111', size = 14, bg = '#fff', pipColor }) {
       display: 'inline-block', width: size, height: size, borderRadius: Math.round(size * 0.22),
       background: bg, border: `1px solid ${hexA(color, 0.35)}`, position: 'relative', verticalAlign: '-3px',
     }}>
-      <span style={{
-        position: 'absolute', inset: pad, display: 'grid',
-        gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1fr 1fr 1fr',
-      }}>
-        {pips.flat().map((on, i) => (
-          <span key={i} style={{
-            width: ps, height: ps, borderRadius: '50%', alignSelf: 'center', justifySelf: 'center',
-            background: on ? pip : 'transparent',
-          }} />
-        ))}
-      </span>
+      {face === 1 ? (
+        <span style={{
+          position: 'absolute', inset: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <StarGlyph size={Math.round(size * 0.72)} color={pip} />
+        </span>
+      ) : (
+        <span style={{
+          position: 'absolute', inset: pad, display: 'grid',
+          gridTemplateColumns: '1fr 1fr 1fr', gridTemplateRows: '1fr 1fr 1fr',
+        }}>
+          {pips.flat().map((on, i) => (
+            <span key={i} style={{
+              width: ps, height: ps, borderRadius: '50%', alignSelf: 'center', justifySelf: 'center',
+              background: on ? pip : 'transparent',
+            }} />
+          ))}
+        </span>
+      )}
     </span>
   );
 }
@@ -157,6 +223,7 @@ function PlayerRow({
         tone={tone}
         size={dieSize}
         state={state}
+        rolledAt={d.rolledAt}
         onClick={canTap ? () => onToggleSelect(i) : undefined}
         ariaLabel={visible ? `die ${d.face}` : 'hidden die'}
       />
