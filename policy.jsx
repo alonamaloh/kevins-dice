@@ -9,9 +9,13 @@
 //
 // The exported graph (gui/policy.onnx) takes (obs[obs_dim],
 // move_features[n,9]) and returns scores[n]; we argmax to pick a move.
-// `obs_dim` is auto-detected from the loaded ONNX model: a window-net
-// snapshot has obs_dim = base_dim + window_size * ACTION_FEAT_DIM, where
-// base_dim is fixed by num_players.
+// obs_dim = base_dim + WINDOW_SIZE * ACTION_FEAT_DIM. Set WINDOW_SIZE
+// (below) to match whatever snapshot was exported into policy.onnx —
+// 0 for the legacy Markov-only net, 12 for the window-net family
+// trained from the 50M run onward. ORT-web doesn't expose model
+// input shapes via a stable public API, so we hardcode rather than
+// auto-detect (an earlier auto-detect attempt silently fell back to
+// 0 and produced a confusing dim-mismatch at the first inference call).
 //
 // All exported helpers are stuck on `window` so app.jsx can reach them.
 
@@ -34,6 +38,9 @@ const MOVE_FEAT_DIM = 9;
 // skipped).
 const ACTION_FEAT_DIM = 10;
 const STARTING_DICE = 5;
+// Must match the trained snapshot whose weights are in policy.onnx.
+// Bump (and re-deploy) when the deployed model changes architecture.
+const WINDOW_SIZE = 12;
 
 // Match the WASM bundle to the umd script tag in Kevin's Dice.html.
 ort.env.wasm.wasmPaths =
@@ -44,42 +51,13 @@ ort.env.wasm.numThreads = 1;
 
 let _session = null;
 let _sessionPromise = null;
-// Auto-detected at load time from the model's `obs` input dim. 0 means
-// "Markov baseline" (no action window); >0 means window-net with this
-// many slots. Set by `loadPolicy` before any inference call returns.
-let _windowSize = 0;
 
-function _detectWindowSize(session, numPlayers) {
-  // ORT-web exposes input shapes via session.inputMetadata['<name>'].dimensions.
-  // Numeric dims come back as numbers; symbolic dims as strings ("n_moves").
-  // The `obs` input is always fully concrete.
-  const meta = session.inputMetadata && session.inputMetadata.obs;
-  if (!meta || !Array.isArray(meta.dimensions) || meta.dimensions.length !== 1) {
-    return 0;
-  }
-  const obsDim = Number(meta.dimensions[0]);
-  const baseDim = 6 + 6 + 1 + (numPlayers - 1) * 8 + 6 + 1; // mirror _obs_dim
-  const extra = obsDim - baseDim;
-  if (extra <= 0) return 0;
-  if (extra % ACTION_FEAT_DIM !== 0) {
-    console.warn('policy.jsx: obs_dim', obsDim,
-      'incompatible with base', baseDim, '+ k*', ACTION_FEAT_DIM,
-      '— falling back to window=0');
-    return 0;
-  }
-  return extra / ACTION_FEAT_DIM;
-}
-
-function loadPolicy(path = 'policy.onnx', numPlayers = 4) {
+function loadPolicy(path = 'policy.onnx') {
   if (_session) return Promise.resolve(_session);
   if (_sessionPromise) return _sessionPromise;
   _sessionPromise = ort.InferenceSession.create(path, {
     executionProviders: ['wasm'],
-  }).then((s) => {
-    _session = s;
-    _windowSize = _detectWindowSize(s, numPlayers);
-    return s;
-  });
+  }).then((s) => { _session = s; return s; });
   return _sessionPromise;
 }
 
@@ -137,7 +115,7 @@ function encodeObs(players, perspectiveIdx, currentBid, bidderIdx,
   // + others_block ((n-1)*8) + bid_block (6) + phase (1) + (window-net)
   // sliding-window of past actions (window_size * ACTION_FEAT_DIM).
   const baseDim = 6 + 6 + 1 + (n - 1) * 8 + 6 + 1;
-  const obsDim = baseDim + _windowSize * ACTION_FEAT_DIM;
+  const obsDim = baseDim + WINDOW_SIZE * ACTION_FEAT_DIM;
   const obs = new Float32Array(obsDim);
   let o = 0;
   obs.set(hiddenHist, o);   o += 6;
@@ -146,12 +124,12 @@ function encodeObs(players, perspectiveIdx, currentBid, bidderIdx,
   for (const b of otherBlocks) { obs.set(b, o); o += 8; }
   obs.set(bidBlock, o); o += 6;
   obs[o++] = isShowRerollPhase ? 1.0 : 0.0;
-  if (_windowSize > 0) {
+  if (WINDOW_SIZE > 0) {
     // Walk cycle to self for bid prompts; leave alone for show-reroll
     // prompts (the agent's own bid is the most recent slot, intentionally).
     const walk = !isShowRerollPhase;
     const slots = actionLog ? actionLogToSlots(actionLog, me, n, walk) : [];
-    obs.set(slotsToWindow(slots, _windowSize), o);
+    obs.set(slotsToWindow(slots, WINDOW_SIZE), o);
   }
   return obs;
 }
