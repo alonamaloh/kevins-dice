@@ -11,7 +11,7 @@ const { playRollSound, unlockAudio } = window;
 
 // Player setup: human + 3 AI.
 const PLAYERS = [
-  { id: 'al',    name: 'Al',    color: '#D88A1F', isHuman: false },
+  { id: 'al',    name: 'Al',    color: '#CB3F3F', isHuman: false },
   { id: 'kban',  name: 'K-Ban', color: '#3F8CCB', isHuman: false },
   { id: 'marty', name: 'Marty', color: '#5BA15B', isHuman: false },
   { id: 'you',   name: 'You',   color: '#7A4FB0', isHuman: true  },
@@ -44,7 +44,16 @@ function makeInitialState({ splash = false } = {}) {
     turnIdx: startIdx,
     starterId: PLAYERS[startIdx].id,
     bid: null,
-    history: [], // [{playerId, q, f}]
+    history: [], // [{playerId, q, f}] — current-round bids only; reset each round
+    // Persistent across rounds; mirror of the Python policy's event stream.
+    // Entries are one of:
+    //   {type: 'bid',         actorIdx, q, f}
+    //   {type: 'show-reroll', actorIdx, revealedFaces}
+    //   {type: 'challenge',   actorIdx, challengedQ, challengedF, actualCount}
+    //   {type: 'eliminated',  actorIdx}
+    // The window-net policy walks this log to build its sliding-window
+    // observation. Independent of the per-round `history`.
+    actionLog: [],
     selection: [], // indices in YOUR own dice the user has tapped to mark for show-reroll
     // 'splash' is the first-load gate (lets us collect a user gesture
     // before any audio plays). 'bid' | 'roundEnd' | 'gameOver' are the
@@ -139,7 +148,8 @@ function App() {
         const cur = stateRef.current;
         const total = totalDice(cur.players);
         const cpIdx = indexOfPlayer(cur.players, cp.id);
-        const move = await policyChooseBid(cur.players, cur.bid, cpIdx, cur.history, total);
+        const move = await policyChooseBid(cur.players, cur.bid, cpIdx,
+                                            cur.history, total, cur.actionLog);
         if (cancelled) return;
         if (move.action === 'liar') {
           doCallLiar(cp.id);
@@ -151,10 +161,13 @@ function App() {
           const projected = cur.players.map((p) => ({
             ...p, dice: p.dice.map((d) => ({ ...d })),
           }));
-          // policyChooseShowReroll expects the current bid; the projection's
-          // dice haven't been re-rolled yet, so the AI scores its decision
-          // against its actual hand.
-          const sr = await policyChooseShowReroll(projected, newBid, cpIdx);
+          // For the show-reroll decision the AI sees the just-committed bid
+          // already in the log, so append a synthetic bid entry to the log
+          // we pass in. We don't mutate state.actionLog here — that happens
+          // in doCommitBid once the move is actually applied.
+          const projLog = [...cur.actionLog,
+            { type: 'bid', actorIdx: cpIdx, q: newBid.q, f: newBid.f }];
+          const sr = await policyChooseShowReroll(projected, newBid, cpIdx, projLog);
           if (cancelled) return;
           doCommitBid(cp.id, newBid, sr);
         }
@@ -186,6 +199,12 @@ function App() {
       const pIdx = indexOfPlayer(players, playerId);
       const actor = players[pIdx];
 
+      // Capture the revealed faces *before* mutating actor.dice, so the
+      // log records the actual revealed faces (not the post-reroll ones).
+      const revealedFaces = willReveal
+        ? actor.dice.filter((d, i) => revealHandIndices.has(i)).map((d) => d.face)
+        : null;
+
       if (willReveal) {
         const t = Date.now();
         actor.dice = actor.dice.map((d, i) => {
@@ -196,9 +215,14 @@ function App() {
       }
 
       const history = [...s.history, { playerId, q: bid.q, f: bid.f }];
+      const actionLog = [...s.actionLog,
+        { type: 'bid', actorIdx: pIdx, q: bid.q, f: bid.f }];
+      if (willReveal) {
+        actionLog.push({ type: 'show-reroll', actorIdx: pIdx, revealedFaces });
+      }
       const nextIdx = nextAlive(players, pIdx);
       return {
-        ...s, players, history, bid, turnIdx: nextIdx, selection: [],
+        ...s, players, history, actionLog, bid, turnIdx: nextIdx, selection: [],
       };
     });
     // Reroll clatter — rerolled count = (hidden dice before) - (revealed).
@@ -228,8 +252,14 @@ function App() {
       const players = s.players.map((p) => ({
         ...p, dice: p.dice.map((d) => ({ ...d, revealed: true })),
       }));
+      const challengerIdx = indexOfPlayer(s.players, challengerId);
+      const actionLog = [...s.actionLog, {
+        type: 'challenge', actorIdx: challengerIdx,
+        challengedQ: s.bid.q, challengedF: s.bid.f,
+        actualCount: result.actual,
+      }];
       return {
-        ...s, players, phase: 'roundEnd',
+        ...s, players, actionLog, phase: 'roundEnd',
         challenge: {
           ...result, bidderId, challengerId, loserId, winnerId,
           isEquality, lossAmount, bid: s.bid,
@@ -260,12 +290,25 @@ function App() {
         loser.dice = loser.dice.slice(0, newSize);
       }
 
-      // Eliminate any player at 0 dice.
-      players.forEach((p) => { if (p.dice.length === 0) p.alive = false; });
+      // Eliminate any player at 0 dice. Append elimination entries to
+      // the persistent action log so the policy's window-builder advances
+      // its alive vector at the right point in time.
+      const newlyEliminated = [];
+      players.forEach((p, i) => {
+        if (p.dice.length === 0 && p.alive) {
+          p.alive = false;
+          newlyEliminated.push(i);
+        }
+      });
+      const actionLog = newlyEliminated.length
+        ? [...s.actionLog, ...newlyEliminated.map((i) =>
+            ({ type: 'eliminated', actorIdx: i }))]
+        : s.actionLog;
 
       const aliveCount = players.filter((p) => p.alive).length;
       if (aliveCount <= 1) {
-        return { ...s, players, phase: 'gameOver', bid: null, history: [], challenge: s.challenge };
+        return { ...s, players, actionLog, phase: 'gameOver',
+                 bid: null, history: [], challenge: s.challenge };
       }
 
       // Re-roll everyone.
@@ -278,7 +321,7 @@ function App() {
 
       return {
         ...s,
-        players, phase: 'bid',
+        players, actionLog, phase: 'bid',
         starterId: players[starterIdx].id,
         turnIdx: starterIdx,
         bid: null, history: [], selection: [], challenge: null,
