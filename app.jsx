@@ -366,7 +366,9 @@ function App() {
   }
 
   // Validate: can the human do show-reroll with the current selection for `bid`?
-  // Works for opener bids too (no `state.bid` required).
+  // Works for opener bids too (no `state.bid` required). The selected dice
+  // do NOT have to support the bid — any hidden dice may be shown, as long
+  // as ≥1 die stays hidden.
   function selectionValidForBid(s, bid) {
     if (!bid) return false;
     const me = s.players.find((p) => p.isHuman);
@@ -374,7 +376,7 @@ function App() {
     const hiddenIdxs = me.dice.map((d, i) => ({ d, i })).filter(({ d }) => !d.revealed).map(({ i }) => i);
     if (s.selection.some((i) => !hiddenIdxs.includes(i))) return false;
     if (s.selection.length >= hiddenIdxs.length) return false; // must leave ≥1 hidden
-    return s.selection.every((i) => supportsBid(me.dice[i].face, bid.f));
+    return true;
   }
 
   function humanCommitBid(bid) {
